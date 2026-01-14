@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mic to Speaker</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            padding: 40px 30px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 400px;
+            width: 100%;
+            text-align: center;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 28px;
+        }
+
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+
+        .button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 18px 40px;
+            font-size: 18px;
+            border-radius: 50px;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            width: 100%;
+            font-weight: 600;
+            touch-action: manipulation;
+        }
+
+        .button:active {
+            transform: scale(0.95);
+        }
+
+        .button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .button.active {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            box-shadow: 0 0 20px rgba(245, 87, 108, 0.5);
+        }
+
+        .status {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 10px;
+            font-size: 14px;
+            min-height: 50px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .status.info {
+            background: #e3f2fd;
+            color: #1976d2;
+        }
+
+        .status.success {
+            background: #e8f5e9;
+            color: #388e3c;
+        }
+
+        .status.error {
+            background: #ffebee;
+            color: #c62828;
+        }
+
+        .volume-indicator {
+            margin-top: 20px;
+            height: 8px;
+            background: #e0e0e0;
+            border-radius: 4px;
+            overflow: hidden;
+            display: none;
+        }
+
+        .volume-indicator.active {
+            display: block;
+        }
+
+        .volume-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #4caf50, #ff9800, #f44336);
+            width: 0%;
+            transition: width 0.1s;
+        }
+
+        .controls {
+            margin-top: 20px;
+            display: none;
+        }
+
+        .controls.active {
+            display: block;
+        }
+
+        .volume-control {
+            margin-top: 15px;
+        }
+
+        .volume-control label {
+            display: block;
+            color: #666;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+
+        .volume-control input {
+            width: 100%;
+            height: 6px;
+            border-radius: 3px;
+            outline: none;
+            -webkit-appearance: none;
+            background: #e0e0e0;
+        }
+
+        .volume-control input::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #667eea;
+            cursor: pointer;
+        }
+
+        .volume-control input::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #667eea;
+            cursor: pointer;
+            border: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎤 Mic to Speaker</h1>
+        <p class="subtitle">Stream microphone to your speakers</p>
+
+        <button id="toggleBtn" class="button">Start Streaming</button>
+
+        <div id="status" class="status info">
+            Tap the button to begin
+        </div>
+
+        <div id="volumeIndicator" class="volume-indicator">
+            <div id="volumeBar" class="volume-bar"></div>
+        </div>
+
+        <div id="controls" class="controls">
+            <div class="volume-control">
+                <label for="gainSlider">Output Volume: <span id="gainValue">100</span>%</label>
+                <input type="range" id="gainSlider" min="0" max="200" value="100">
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let audioContext = null;
+        let microphone = null;
+        let gainNode = null;
+        let analyser = null;
+        let animationFrame = null;
+        let isStreaming = false;
+
+        const toggleBtn = document.getElementById('toggleBtn');
+        const status = document.getElementById('status');
+        const volumeIndicator = document.getElementById('volumeIndicator');
+        const volumeBar = document.getElementById('volumeBar');
+        const controls = document.getElementById('controls');
+        const gainSlider = document.getElementById('gainSlider');
+        const gainValue = document.getElementById('gainValue');
+
+        function updateStatus(message, type = 'info') {
+            status.textContent = message;
+            status.className = `status ${type}`;
+        }
+
+        function updateVolumeIndicator() {
+            if (!analyser) return;
+
+            const dataArray = new Uint8Array(analyser.frequencyBinCount);
+            analyser.getByteFrequencyData(dataArray);
+
+            const average = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
+            const percentage = (average / 255) * 100;
+
+            volumeBar.style.width = `${percentage}%`;
+
+            if (isStreaming) {
+                animationFrame = requestAnimationFrame(updateVolumeIndicator);
+            }
+        }
+
+        async function startStreaming() {
+            try {
+                updateStatus('Requesting microphone access...', 'info');
+
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        echoCancellation: false,
+                        noiseSuppression: false,
+                        autoGainControl: false
+                    }
+                });
+
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                microphone = audioContext.createMediaStreamSource(stream);
+                gainNode = audioContext.createGain();
+                analyser = audioContext.createAnalyser();
+                analyser.fftSize = 256;
+
+                microphone.connect(analyser);
+                analyser.connect(gainNode);
+                gainNode.connect(audioContext.destination);
+
+                gainNode.gain.value = gainSlider.value / 100;
+
+                isStreaming = true;
+                toggleBtn.textContent = 'Stop Streaming';
+                toggleBtn.classList.add('active');
+                updateStatus('Streaming active - Audio playing through speakers', 'success');
+                volumeIndicator.classList.add('active');
+                controls.classList.add('active');
+
+                updateVolumeIndicator();
+            } catch (error) {
+                console.error('Error accessing microphone:', error);
+                updateStatus(`Error: ${error.message}`, 'error');
+                stopStreaming();
+            }
+        }
+
+        function stopStreaming() {
+            if (microphone) {
+                microphone.mediaStream.getTracks().forEach(track => track.stop());
+                microphone.disconnect();
+                microphone = null;
+            }
+
+            if (gainNode) {
+                gainNode.disconnect();
+                gainNode = null;
+            }
+
+            if (analyser) {
+                analyser.disconnect();
+                analyser = null;
+            }
+
+            if (audioContext) {
+                audioContext.close();
+                audioContext = null;
+            }
+
+            if (animationFrame) {
+                cancelAnimationFrame(animationFrame);
+                animationFrame = null;
+            }
+
+            isStreaming = false;
+            toggleBtn.textContent = 'Start Streaming';
+            toggleBtn.classList.remove('active');
+            updateStatus('Streaming stopped', 'info');
+            volumeIndicator.classList.remove('active');
+            controls.classList.remove('active');
+        }
+
+        toggleBtn.addEventListener('click', () => {
+            if (isStreaming) {
+                stopStreaming();
+            } else {
+                startStreaming();
+            }
+        });
+
+        gainSlider.addEventListener('input', (e) => {
+            const value = e.target.value;
+            gainValue.textContent = value;
+            if (gainNode) {
+                gainNode.gain.value = value / 100;
+            }
+        });
+    </script>
+</body>
+</html>
